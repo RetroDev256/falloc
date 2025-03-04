@@ -1,0 +1,11 @@
+.{
+    .name = .falloc,
+    .version = "0.0.0",
+    .fingerprint = 0xcdde2e6c636371b0,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
