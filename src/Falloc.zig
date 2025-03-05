@@ -95,42 +95,98 @@ fn resize(_: *anyopaque, memory: []u8, a: Alignment, new_len: usize, _: usize) b
     const footer_addr = footer_a.forward(aligned_addr + memory.len);
     assert(footer_a.check(footer_addr));
 
-    const footer: *Footer = @ptrFromInt(footer_addr);
-
     // Allocate enough space for the footer & proper alignment
     const new_map_len = new_len + @sizeOf(Footer);
     const new_over_alloc = new_map_len + footer_a.toByteUnits() + a.toByteUnits();
-    std.posix.ftruncate(footer.fd, @intCast(new_over_alloc)) catch {
-        return false; // Unable to truncate the file
-    };
 
-    const mapping = std.posix.mremap(
-        footer.origin,
-        footer.map_len,
-        new_over_alloc,
-        .{},
-        null,
-    ) catch {
-        // Set the file length for if the ftruncate succeeds but the mremap fails
-        // This goes at the original address as we judge the position of the footer
-        // based on the mapped length, not the file length
-        footer.file_len = new_over_alloc;
-        return false; // Unable to remap the file
-    };
+    const old_footer_ptr: *Footer = @ptrFromInt(footer_addr);
+    const old_footer: Footer = old_footer_ptr.*;
+    const origin = old_footer.origin;
+    const fd = old_footer.fd;
 
-    // The mapping position must not change
-    assert(mapping.ptr == footer.origin);
+    if (new_len > memory.len) {
+        // Attempt to increase the length of the backing file before we attempt to
+        // increase the mapped memory region. This is necessary in the case that the
+        // file truncation succeeds, but the mremap fails.
+        std.posix.ftruncate(fd, new_over_alloc) catch {
+            return false; // Unable to truncate the file
+        };
 
-    const new_footer_addr = footer_a.forward(aligned_addr + new_len);
-    assert(footer_a.check(new_footer_addr));
+        // We know that the file truncation succeeded, and this old footer is still
+        // in the right place as far as our code will still determine - update the
+        // file length to be in a stable state.
+        old_footer_ptr.file_len = new_over_alloc;
 
-    const new_footer: *Footer = @ptrFromInt(new_footer_addr);
-    new_footer.* = .{
-        .origin = footer.origin,
-        .map_len = new_over_alloc,
-        .file_len = new_over_alloc,
-        .fd = footer.fd,
-    };
+        const mapping = std.posix.mremap(
+            origin,
+            old_footer.map_len,
+            new_over_alloc,
+            .{},
+            null,
+        ) catch {
+            // Unable to remap the file -
+            // We are in a stable state - the pointer remains the same, and because the
+            // backing file only increased in memory, we can read and write to the footer
+            // with the same address. After all, we find the address of the footer based
+            // on the length of the memory slice.
+            return false;
+        };
+
+        // The mapping position must not change
+        assert(mapping.ptr == origin);
+
+        const new_footer_addr = footer_a.forward(aligned_addr + new_len);
+        assert(footer_a.check(new_footer_addr));
+        const new_footer_ptr: *Footer = @ptrFromInt(new_footer_addr);
+
+        // Everything succeeded, update the metadata
+        new_footer_ptr.* = .{
+            .fd = fd,
+            .origin = origin,
+            .file_len = new_over_alloc,
+            .map_len = new_over_alloc,
+        };
+    } else {
+        // Attempt to remap the memmory mapped region before we attempt to truncate the file
+        // This is because we will still be in a stable state where we can access the entire
+        // addressed range, and it will have a backing file for that entire range. In the
+        // case that the mremap succeeds but the ftruncate fails, we can still say that the
+        // resize was a success, but the metadata will help us track what we *actually* have
+        // in spare memory capacity for the file.
+        const mapping = std.posix.mremap(
+            origin,
+            old_footer.map_len,
+            new_over_alloc,
+            .{},
+            null,
+        ) catch {
+            return false; // Unable to remap the file
+        };
+
+        const new_footer_addr = footer_a.forward(aligned_addr + new_len);
+        assert(footer_a.check(new_footer_addr));
+        const new_footer_ptr: *Footer = @ptrFromInt(new_footer_addr);
+
+        // To ensure a stable state for the allocation, record the state of the allocation.
+        new_footer_ptr.* = .{
+            .fd = fd,
+            .origin = origin,
+            .file_len = old_footer.file_len,
+            .map_len = new_over_alloc,
+        };
+
+        // The mapping position must not change
+        assert(mapping.ptr == origin);
+
+        std.posix.ftruncate(fd, new_over_alloc) catch {
+            // Unable to truncate the file. Kinda unfortunate, this. Thankfully we are
+            // currently in a stable state as to simply return failure.
+            return false;
+        };
+
+        // Everything succeeded, update the metadata
+        new_footer_ptr.file_len = new_over_alloc;
+    }
 
     return true;
 }
