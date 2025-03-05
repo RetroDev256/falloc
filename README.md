@@ -2,7 +2,7 @@ Ever wanted a zig allocator that could allocate all the free space of your HDD? 
 
 I created this allocator (POSIX systems only right now) for the purpose of single, *very* large allocations. Think lots and lots of math with hundreds of gigabytes in each array.
 
-It is advised that you use ReleaseFast/ReleaseSmall when using this library. When using Debug/ReleaseSafe, the allocated memory is set to `undefined` by the Allocator interface, which may take a while on large allocations.
+It is advised that you use ReleaseFast/ReleaseSmall when using this library. This is because the allocated memory is set to `undefined` by the Allocator interface, which may take a while for large allocations.
 
 ```zig
 const std = @import("std");
