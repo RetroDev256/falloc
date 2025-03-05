@@ -69,7 +69,7 @@ fn alloc(_: *anyopaque, len: usize, a: Alignment, _: usize) ?[*]u8 {
     // Allow our page to be readable, writable, and used for atomics
     const prot: u32 = PROT.WRITE | PROT.READ | PROT.SEM;
     // Our page must map directly to the temporary file on-disk
-    const map: MAP = .{ .NORESERVE = true, .TYPE = .SHARED };
+    const map: MAP = .{ .UNINITIALIZED = true, .TYPE = .SHARED };
 
     const mapping = std.posix.mmap(null, over_alloc, prot, map, fd, 0) catch {
         std.posix.close(fd);

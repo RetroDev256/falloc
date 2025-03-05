@@ -4,7 +4,8 @@ const falloc = @import("falloc");
 
 pub fn main() !void {
     const gpa: Allocator = falloc.allocator;
-    // 256 GiB (may take a while, look at disk IO for your progress bar lol)
+
+    // 256 GiB of memory to work with
     const mem = try gpa.alloc(u8, 1 << 38);
     defer gpa.free(mem);
 
