@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const falloc_mod = b.addModule("falloc", .{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/Falloc.zig"),
+        .root_source_file = b.path("src/falloc.zig"),
     });
 
     // Root Module
@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    exe_mod.addImport("Falloc", falloc_mod);
+    exe_mod.addImport("falloc", falloc_mod);
 
     // Binary artifact
     const exe = b.addExecutable(.{
