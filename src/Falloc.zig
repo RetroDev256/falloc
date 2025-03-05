@@ -76,7 +76,7 @@ fn alloc(_: *anyopaque, len: usize, a: Alignment, _: usize) ?[*]u8 {
         return null;
     };
 
-    // Set the footer so that we can resize/remap/free later
+    // Set the footer so that we can resize, remap, and free
     Footer.acquire(mapping.ptr, len).* = .{
         .origin = mapping.ptr,
         .fd = fd,
@@ -141,28 +141,61 @@ fn resize(_: *anyopaque, memory: []u8, a: Alignment, new_len: usize, _: usize) b
     return true;
 }
 
-/// Attempt to expand or shrink memory, allowing relocation.
-///
-/// `memory.len` must equal the length requested from the most recent
-/// successful call to `alloc`, `resize`, or `remap`. `alignment` must
-/// equal the same value that was passed as the `alignment` parameter to
-/// the original `alloc` call.
-///
-/// A non-`null` return value indicates the resize was successful. The
-/// allocation may have same address, or may have been relocated. In either
-/// case, the allocation now has size of `new_len`. A `null` return value
-/// indicates that the resize would be equivalent to allocating new memory,
-/// copying the bytes from the old memory, and then freeing the old memory.
-/// In such case, it is more efficient for the caller to perform the copy.
-///
-/// `new_len` must be greater than zero.
-///
-/// `ret_addr` is optionally provided as the first return address of the
-/// allocation call stack. If the value is `0` it means no return address
-/// has been provided.
-fn remap(_: *anyopaque, memory: []u8, a: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-    _ = .{ memory, a, new_len, ret_addr };
-    return null;
+fn remap(_: *anyopaque, memory: []u8, a: Alignment, new_len: usize, _: usize) ?[*]u8 {
+    // Allocate enough space for the footer & proper alignment
+    const over_alloc = Footer.overAllocLength(new_len, a);
+
+    // Copy the footer because it's pointer may be invalidated
+    const footer: Footer = Footer.acquire(memory.ptr, memory.len).*;
+    const mapped_len = footer.mappedSlice(memory.len, a).len;
+
+    var mapping: []align(std.heap.page_size_min) u8 = undefined;
+
+    if (new_len > memory.len) {
+        // We must attempt to grow the file before we remap, otherwise we
+        // will risk some bytes being mapped, but truncated from the file,
+        // resulting in a bus error each time we read this memory.
+
+        std.posix.ftruncate(footer.fd, over_alloc) catch return null;
+
+        mapping = std.posix.mremap(
+            footer.origin,
+            mapped_len,
+            over_alloc,
+            .{ .MAYMOVE = true },
+            null,
+        ) catch return null;
+    } else {
+        // We must attempt to remap before we shrink the file, otherwise we
+        // will risk some bytes being mapped, but truncated from the file,
+        // resulting in a bus error each time we read this memory.
+
+        mapping = std.posix.mremap(
+            footer.origin,
+            mapped_len,
+            over_alloc,
+            .{ .MAYMOVE = true },
+            null,
+        ) catch return null;
+
+        // This is allowed to silently fail - further resizes will reattempt
+        // to correctly size the file anyways, and it doesn't effect our
+        // footer or memory mapping if it is a little large.
+        std.posix.ftruncate(footer.fd, over_alloc) catch {};
+    }
+
+    // We have successfully remapped our allocation, so now we need to give it
+    // a footer. This isn't the same footer because the origin has shifted.
+    Footer.acquire(mapping.ptr, new_len).* = .{
+        .origin = mapping.ptr,
+        .fd = footer.fd,
+    };
+
+    // Align the memory correctly
+    const data_addr = a.forward(@intFromPtr(mapping.ptr));
+    assert(a.check(data_addr));
+
+    return @ptrFromInt(data_addr);
 }
 
 fn free(_: *anyopaque, data: []u8, data_align: Alignment, _: usize) void {
