@@ -206,7 +206,6 @@ fn free(_: *anyopaque, data: []u8, data_align: Alignment, _: usize) void {
 }
 
 fn tmpfile() !std.posix.fd_t {
-    // TODO: some number of attempts with 32/64 bit random number instead?
     const id = std.crypto.random.int(u128);
     const path = "/tmp/" ++ std.fmt.hex(id);
     const fd = try std.posix.open(path, .{
