@@ -108,8 +108,8 @@ fn resize(_: *anyopaque, memory: []u8, a: Alignment, new_len: usize, _: usize) b
             footer.origin,
             mapped_len,
             over_alloc,
-            .{ .FIXED = true },
-            footer.origin,
+            .{},
+            null,
         ) catch return false;
 
         assert(mapping.ptr == footer.origin);
@@ -122,8 +122,8 @@ fn resize(_: *anyopaque, memory: []u8, a: Alignment, new_len: usize, _: usize) b
             footer.origin,
             mapped_len,
             over_alloc,
-            .{ .FIXED = true },
-            footer.origin,
+            .{},
+            null,
         ) catch return false;
 
         assert(mapping.ptr == footer.origin);
